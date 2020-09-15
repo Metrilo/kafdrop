@@ -23,7 +23,52 @@ spec:
 {{ toYaml .Values.podAnnotations | indent 8 }}
 {{- end }}        
     spec:
+      volumes:
+      - name: auth-secret
+        secret:
+          secretName: kafdrop-secret
+      - name: nginx-configs
+        configMap:
+          name: kafdrop-nginx-configs
+      initContainers:
+      - name: init-sysctl
+        image: busybox
+        command:
+          - sysctl
+          - -w
+          - net.core.somaxconn=1024
+        securityContext:
+          privileged: true
       containers:
+        - name: kafdrop-nginx
+          image: nginx
+          ports:
+          - name: nginx
+            containerPort: 80
+            protocol: TCP
+          resources:
+            requests:
+              memory: 5Mi
+              cpu: 10m
+            limits:
+              memory: 256Mi
+              cpu: 1
+          volumeMounts:
+          - name: nginx-configs
+            mountPath: /etc/nginx/nginx.conf
+            subPath: nginx.conf
+          - name: nginx-configs
+            mountPath: /usr/share/nginx/html/401.html
+            subPath: 401.html
+          - name: auth-secret
+            mountPath: /etc/auth-secret
+          lifecycle:
+            postStart:
+              exec:
+                command: ['/bin/sh', '-c', 'printf "$(cat /etc/auth-secret/username):$(openssl passwd -apr1 $(cat /etc/auth-secret/password))\n" >> /etc/nginx/.htpasswd']
+            preStop:
+              exec:
+                command: ['/bin/sh', '-c', 'sleep 90 && nginx -s quit']
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
